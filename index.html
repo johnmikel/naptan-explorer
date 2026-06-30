@@ -5,13 +5,27 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>NaPTAN Data-Quality Explorer — John Mikel Regida</title>
   <meta name="description" content="Explore the entire UK NaPTAN dataset (435,029 stops) in your browser — data-quality checks for freshness, validity, and completeness, queried live with DuckDB-WASM. By John Mikel Regida.">
+  <link rel="canonical" href="https://www.johnmikelregida.com/labs/naptan">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <meta name="theme-color" content="#0B0B0D">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="John Mikel Regida">
+  <meta property="og:title" content="NaPTAN Explorer — John Mikel Regida">
+  <meta property="og:description" content="All 435,029 UK public-transport stops queryable in your browser with DuckDB-WASM over a 9MB parquet — filter, search and run SQL over the full dataset. Daily auto-refresh.">
+  <meta property="og:url" content="https://www.johnmikelregida.com/labs/naptan">
+  <meta property="og:image" content="https://www.johnmikelregida.com/og.jpg">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="NaPTAN Explorer — John Mikel Regida">
+  <meta name="twitter:description" content="All 435,029 UK public-transport stops queryable in your browser with DuckDB-WASM over a 9MB parquet — filter, search and run SQL over the full dataset. Daily auto-refresh.">
+  <meta name="twitter:image" content="https://www.johnmikelregida.com/og.jpg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,340..500&family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
     :root{
       --bg:#0B0B0D;--surface:rgba(255,255,255,.025);--surface2:rgba(255,255,255,.05);
-      --text:#ECECEA;--muted:#8A8A8F;--faint:#5E5E63;--line:rgba(255,255,255,.09);--line-strong:rgba(255,255,255,.2);
+      --text:#ECECEA;--muted:#8A8A8F;--faint:#7B7B80;--line:rgba(255,255,255,.09);--line-strong:rgba(255,255,255,.2);
       --accent:#7C9CC2;--accent-soft:rgba(124,156,194,.14);--good:#5FBF6E;--warn:#E0A85C;--bad:#E0795B;--grid:rgba(255,255,255,.022);
     }
     *{box-sizing:border-box}
@@ -66,7 +80,7 @@
     .ex-engine .ok{color:var(--good)} .ex-engine .err{color:var(--bad)}
     .toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:18px 0 6px}
     .chips{display:flex;gap:8px;flex-wrap:wrap}
-    .chips button{font-family:"IBM Plex Mono",monospace;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);background:transparent;border:1px solid var(--line);border-radius:999px;padding:7px 13px;cursor:pointer;transition:all .15s}
+    .chips button{font-family:"IBM Plex Mono",monospace;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);background:transparent;border:1px solid var(--line);border-radius:999px;padding:11px 13px;min-height:40px;cursor:pointer;transition:all .15s}
     .chips button:hover{border-color:var(--line-strong);color:var(--text)}
     .chips button.active{color:var(--bg);background:var(--text);border-color:var(--text)}
     .search{flex:1;min-width:200px;display:flex}
@@ -84,7 +98,7 @@
     .tag.inactive{color:var(--bad);border-color:rgba(224,121,91,.45)}
     .tag.stale{color:var(--warn);border-color:rgba(224,168,92,.45)}
     .pager{display:flex;align-items:center;gap:14px;margin-top:18px;font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--muted)}
-    .pager button{background:transparent;border:1px solid var(--line);border-radius:8px;color:var(--text);padding:7px 13px;cursor:pointer}
+    .pager button{background:transparent;border:1px solid var(--line);border-radius:8px;color:var(--text);padding:11px 13px;min-height:40px;cursor:pointer}
     .pager button:disabled{opacity:.35;cursor:default}
     .sql-toggle{margin-top:22px;font-family:"IBM Plex Mono",monospace;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);cursor:pointer;background:none;border:none;padding:0}
     .sqlbox{margin-top:12px;display:none}
@@ -196,6 +210,22 @@ ORDER BY stops DESC;</textarea>
   }
   function rowTags(r){return ["coord_bad","locality_bad","inactive","stale"].filter(function(k){return r[k];}).map(function(k){return '<span class="tag '+TAGS[k][0]+'">'+TAGS[k][1]+'</span>';}).join("");}
   function setEngine(html){document.getElementById("engine").innerHTML=html;}
+  // ---- static fallback: render embedded sample rows if the query engine fails ----
+  var ISSUE_CLASS={coord:"coord",coord_bad:"coord",locality:"locality",locality_bad:"locality",inactive:"inactive",stale:"stale"};
+  window.__naptanFallback=function(){
+    var sample=DATA.sampleFlagged||[];
+    if(!sample.length) return;
+    var html='<div class="ex-count" style="color:var(--warn);margin:0 0 14px">Query engine unavailable — showing '+sample.length+' sample row'+(sample.length===1?"":"s")+'.</div>';
+    html+='<table><thead><tr><th>ATCO</th><th>Stop name</th><th class="hide-sm">Locality</th><th class="hide-sm">Status</th><th class="hide-sm">Modified</th><th>Issues</th></tr></thead><tbody>';
+    html+=sample.map(function(r){
+      var tags=(r.issues||[]).map(function(k){var cl=ISSUE_CLASS[k]||"";return '<span class="tag '+cl+'">'+k+'</span>';}).join("");
+      return '<tr><td class="atco">'+r.atco+'</td><td class="nm">'+(r.name||"—")+'</td><td class="hide-sm">'+(r.locality||'<span style="color:var(--bad)">—</span>')+'</td><td class="hide-sm">'+(r.status||"—")+'</td><td class="hide-sm mono">'+(r.mod||"—")+'</td><td>'+(tags||'<span class="tag" style="color:var(--good);border-color:rgba(95,191,110,.4)">clean</span>')+'</td></tr>';
+    }).join("");
+    html+='</tbody></table>';
+    document.getElementById("result").innerHTML=html;
+    var c=document.getElementById("count"); if(c) c.innerHTML="";
+    var p=document.getElementById("pager"); if(p) p.style.display="none";
+  };
   async function refresh(){
     if(!conn) return;
     var w=whereSQL();
@@ -235,7 +265,7 @@ ORDER BY stops DESC;</textarea>
   <script type="module">
   (async function(){
     var PARQUET=new URL("naptan.parquet",document.baseURI).href;
-    function fail(msg){var e=document.getElementById("engine");e.innerHTML='<span class="err">engine unavailable</span>';document.getElementById("loading").innerHTML="Couldn’t load the in-browser query engine here ("+msg+"). The full-dataset aggregates above are still exact. Try a Chromium browser, or open this page directly.";}
+    function fail(msg){var e=document.getElementById("engine");e.innerHTML='<span class="err">engine unavailable</span>';var l=document.getElementById("loading");if(l)l.innerHTML="Couldn’t load the in-browser query engine here ("+msg+"). The full-dataset aggregates above are still exact. Try a Chromium browser, or open this page directly.";if(window.__naptanFallback)window.__naptanFallback();}
     try{
       var duckdb=await import("https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm/+esm");
       var bundles=duckdb.getJsDelivrBundles();
