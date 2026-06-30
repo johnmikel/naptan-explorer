@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NaPTAN Data-Quality Explorer — John Mikel Regida</title>
+  <meta name="description" content="Explore the entire UK NaPTAN dataset (435,029 stops) in your browser — data-quality checks for freshness, validity, and completeness, queried live with DuckDB-WASM. By John Mikel Regida.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,340..500&family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --bg:#0B0B0D;--surface:rgba(255,255,255,.025);--surface2:rgba(255,255,255,.05);
+      --text:#ECECEA;--muted:#8A8A8F;--faint:#5E5E63;--line:rgba(255,255,255,.09);--line-strong:rgba(255,255,255,.2);
+      --accent:#7C9CC2;--accent-soft:rgba(124,156,194,.14);--good:#5FBF6E;--warn:#E0A85C;--bad:#E0795B;--grid:rgba(255,255,255,.022);
+    }
+    *{box-sizing:border-box}
+    html{color:var(--text);background:var(--bg);font-family:"Inter",ui-sans-serif,-apple-system,sans-serif;-webkit-font-smoothing:antialiased}
+    body{margin:0;min-height:100vh;line-height:1.6;background:radial-gradient(900px circle at 80% -5%,rgba(124,156,194,.08),transparent 45%),var(--bg)}
+    body::before{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
+      background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+      background-size:64px 64px;-webkit-mask-image:radial-gradient(circle at 50% 25%,#000,transparent 80%)}
+    .wrap{position:relative;z-index:1;max-width:1140px;margin:0 auto;padding:40px clamp(20px,5vw,56px) 90px}
+    a{color:inherit}
+    .mono{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
+    .top{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:54px}
+    .back{font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+    .back:hover{color:var(--text)}
+    .badge{font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--good);
+      border:1px solid rgba(95,191,110,.42);border-radius:999px;padding:5px 11px}
+    .badge i{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--good);margin-right:8px;vertical-align:middle}
+    .eyebrow{font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);margin-bottom:18px}
+    .eyebrow b{color:var(--accent);font-weight:500}
+    h1{font-family:"Fraunces",Georgia,serif;font-weight:400;font-size:clamp(2.4rem,5vw,4rem);line-height:1.0;letter-spacing:-.02em;margin:0;max-width:18ch}
+    .lede{margin:22px 0 0;max-width:66ch;color:var(--muted);font-size:1.05rem;line-height:1.65}
+    .rule{width:84px;height:2px;background:var(--accent);margin:24px 0 0}
+    .insight{margin:36px 0 0;border-left:2px solid var(--warn);padding:6px 0 6px 22px;font-family:"Fraunces",Georgia,serif;font-size:1.5rem;line-height:1.3;letter-spacing:-.01em;max-width:30ch}
+    .insight b{color:var(--warn);font-weight:500}
+    .cards{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin:44px 0 0}
+    .card{border:1px solid var(--line);border-radius:14px;background:var(--surface);padding:18px}
+    .card .fig{font-family:"Fraunces",Georgia,serif;font-size:1.9rem;line-height:1;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+    .card .fig em{font-style:normal;color:var(--accent)}
+    .card .lab{margin-top:12px;font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+    .card.hot .fig{color:var(--warn)} .card.alert .fig{color:var(--bad)}
+    .grid2{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:20px;margin:44px 0 0;align-items:start}
+    .panel{border:1px solid var(--line);border-radius:16px;background:var(--surface);padding:22px}
+    .panel h2{margin:0 0 4px;font-family:"Fraunces",Georgia,serif;font-weight:460;font-size:1.3rem;letter-spacing:-.01em}
+    .panel .sub{font-family:"IBM Plex Mono",monospace;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);margin-bottom:18px}
+    svg.map{width:100%;height:auto;display:block;border-radius:10px;background:linear-gradient(160deg,rgba(255,255,255,.03),transparent)}
+    .legend{display:flex;gap:18px;margin-top:14px;font-family:"IBM Plex Mono",monospace;font-size:10.5px;letter-spacing:.06em;color:var(--muted)}
+    .legend i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;vertical-align:middle}
+    .checks{display:grid;gap:2px}
+    .check{display:grid;grid-template-columns:1fr auto;gap:6px 14px;align-items:center;padding:13px 4px;border-top:1px solid var(--line)}
+    .check:first-child{border-top:0}
+    .check.clean{opacity:.62}
+    .check .nm{font-size:.95rem} .check .ct{font-family:"IBM Plex Mono",monospace;font-size:.95rem;font-variant-numeric:tabular-nums}
+    .check .ct .pc{color:var(--faint);font-size:.8rem;margin-left:8px}
+    .check .bar{grid-column:1/-1;height:4px;border-radius:3px;background:rgba(255,255,255,.07);overflow:hidden}
+    .check .bar > i{display:block;height:100%;border-radius:3px}
+
+    /* explorer */
+    .explorer{margin-top:44px}
+    .ex-head{display:flex;justify-content:space-between;align-items:baseline;gap:16px;flex-wrap:wrap}
+    .ex-head h2{margin:0;font-family:"Fraunces",Georgia,serif;font-weight:460;font-size:1.45rem;letter-spacing:-.01em}
+    .ex-engine{font-family:"IBM Plex Mono",monospace;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+    .ex-engine .ok{color:var(--good)} .ex-engine .err{color:var(--bad)}
+    .toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:18px 0 6px}
+    .chips{display:flex;gap:8px;flex-wrap:wrap}
+    .chips button{font-family:"IBM Plex Mono",monospace;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);background:transparent;border:1px solid var(--line);border-radius:999px;padding:7px 13px;cursor:pointer;transition:all .15s}
+    .chips button:hover{border-color:var(--line-strong);color:var(--text)}
+    .chips button.active{color:var(--bg);background:var(--text);border-color:var(--text)}
+    .search{flex:1;min-width:200px;display:flex}
+    .search input{flex:1;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:9px 13px;color:var(--text);font-family:"IBM Plex Mono",monospace;font-size:12px}
+    .search input:focus{outline:none;border-color:var(--accent)}
+    .ex-count{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--muted);margin:10px 0 14px}
+    .ex-count b{color:var(--accent);font-weight:500}
+    table{width:100%;border-collapse:collapse;font-size:.9rem}
+    th{text-align:left;font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);font-weight:500;padding:0 12px 12px;border-bottom:1px solid var(--line)}
+    td{padding:12px;border-bottom:1px solid var(--line);color:var(--muted)}
+    td.atco{font-family:"IBM Plex Mono",monospace;color:var(--text)} td.nm{color:var(--text)}
+    .tag{display:inline-block;font-family:"IBM Plex Mono",monospace;font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;border-radius:999px;padding:3px 8px;margin:2px 4px 2px 0;border:1px solid}
+    .tag.coord{color:var(--bad);border-color:rgba(224,121,91,.45)}
+    .tag.locality{color:var(--warn);border-color:rgba(224,168,92,.45)}
+    .tag.inactive{color:var(--bad);border-color:rgba(224,121,91,.45)}
+    .tag.stale{color:var(--warn);border-color:rgba(224,168,92,.45)}
+    .pager{display:flex;align-items:center;gap:14px;margin-top:18px;font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--muted)}
+    .pager button{background:transparent;border:1px solid var(--line);border-radius:8px;color:var(--text);padding:7px 13px;cursor:pointer}
+    .pager button:disabled{opacity:.35;cursor:default}
+    .sql-toggle{margin-top:22px;font-family:"IBM Plex Mono",monospace;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);cursor:pointer;background:none;border:none;padding:0}
+    .sqlbox{margin-top:12px;display:none}
+    .sqlbox.open{display:block}
+    .sqlbox textarea{width:100%;min-height:80px;background:#0d0f12;border:1px solid var(--line);border-radius:10px;color:var(--text);font-family:"IBM Plex Mono",monospace;font-size:12px;padding:13px;resize:vertical}
+    .sqlbox textarea:focus{outline:none;border-color:var(--accent)}
+    .sqlbox .run{margin-top:10px;background:var(--text);color:var(--bg);border:none;border-radius:8px;padding:9px 18px;font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.06em;text-transform:uppercase;cursor:pointer}
+    .loading{color:var(--faint);padding:30px 0;font-family:"IBM Plex Mono",monospace;font-size:12px}
+    .foot{margin-top:60px;padding-top:24px;border-top:1px solid var(--line);font-family:"IBM Plex Mono",monospace;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
+    @media(max-width:900px){.cards{grid-template-columns:repeat(2,1fr)}.grid2{grid-template-columns:1fr}}
+    @media(max-width:560px){.cards{grid-template-columns:1fr}.hide-sm{display:none}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <a class="back" href="https://www.johnmikelregida.com/">← John Mikel Regida</a>
+      <span class="badge" id="badge"><i></i>Live data · 435,029 stops</span>
+    </div>
+    <div class="eyebrow"><b>NaPTAN</b> · Data-quality explorer</div>
+    <h1>What does a national dataset look like when it slips?</h1>
+    <p class="lede" id="lede"></p>
+    <div class="rule"></div>
+    <div class="insight" id="insight"></div>
+
+    <div class="cards" id="cards"></div>
+
+    <div class="grid2">
+      <div class="panel">
+        <h2>Coverage map</h2>
+        <div class="sub" id="mapsub">Sampled stops · flagged vs. clean</div>
+        <svg class="map" id="map" viewBox="0 0 400 480" aria-label="Map of stops across Great Britain"></svg>
+        <div class="legend"><span><i style="background:var(--accent)"></i>Clean</span><span><i style="background:var(--bad)"></i>Has issue</span></div>
+      </div>
+      <div class="panel">
+        <h2>Quality checks</h2>
+        <div class="sub">Across all stops</div>
+        <div class="checks" id="checks"></div>
+      </div>
+    </div>
+
+    <div class="explorer panel">
+      <div class="ex-head">
+        <h2>Explore every record</h2>
+        <span class="ex-engine" id="engine">Booting query engine…</span>
+      </div>
+      <div class="toolbar">
+        <div class="chips" id="chips">
+          <button data-f="all" class="active">All</button>
+          <button data-f="coord_bad">Coords</button>
+          <button data-f="locality_bad">Locality</button>
+          <button data-f="inactive">Inactive</button>
+          <button data-f="stale">Stale</button>
+        </div>
+        <div class="search"><input id="q" type="search" placeholder="Search ATCO, stop name or locality…"></div>
+      </div>
+      <div class="ex-count" id="count"></div>
+      <div id="result"><div class="loading" id="loading">Loading the full 435,029-row dataset into an in-browser DuckDB engine (≈9&nbsp;MB Parquet)…</div></div>
+      <div class="pager" id="pager" style="display:none">
+        <button id="prev">‹ Prev</button><span id="pageinfo"></span><button id="next">Next ›</button>
+      </div>
+      <button class="sql-toggle" id="sqlToggle">⌥ Advanced · run your own SQL</button>
+      <div class="sqlbox" id="sqlbox">
+        <textarea id="sql">SELECT status, count(*) AS stops
+FROM naptan
+GROUP BY status
+ORDER BY stops DESC;</textarea>
+        <button class="run" id="runsql">Run query</button>
+      </div>
+    </div>
+
+    <div class="foot">
+      <span>By John Mikel Regida · Lead Data Architect</span>
+      <span id="srcnote"></span>
+    </div>
+  </div>
+
+  <script>
+  // ---- aggregates (embedded, full-dataset) ----
+  var DATA = __DATA__;
+  var fmt=function(n){return Number(n).toLocaleString("en-GB");};
+  var stale=DATA.checks.filter(function(c){return c.key==="stale";})[0];
+  document.getElementById("lede").innerHTML="Profiling <b style='color:var(--text)'>every one of the "+fmt(DATA.totalStops)+" stops</b> in the live UK NaPTAN dataset (as of "+DATA.asOf+") for the failure modes that quietly break downstream systems — missing coordinates, absent localities, inactive-but-undeleted stops, stale records, and duplicate ATCO codes.";
+  document.getElementById("insight").innerHTML="<b>"+stale.pct+"%</b> of stops haven't been modified in over three years. The dataset is flawless on identifiers — <b>0</b> duplicate ATCO codes across "+fmt(DATA.totalStops)+" records — but freshness is where it ages.";
+  document.getElementById("srcnote").textContent=DATA.source.replace(/</g,"");
+  document.getElementById("mapsub").textContent=fmt(DATA.mapPoints.length)+" sampled stops · flagged vs. clean";
+  var m=DATA.metrics;
+  document.getElementById("cards").innerHTML=[
+    {f:fmt(DATA.totalStops),l:"Stops profiled"},{f:m.validCoordsPct+"<em>%</em>",l:"Valid lat-long"},
+    {f:m.activePct+"<em>%</em>",l:"Active status"},{f:stale.pct+"<em>%</em>",l:"Stale · 3y+",c:"hot"},
+    {f:fmt(m.flaggedTotal),l:"Records flagged",c:"alert"}
+  ].map(function(c){return '<div class="card '+(c.c||'')+'"><div class="fig">'+c.f+'</div><div class="lab">'+c.l+'</div></div>';}).join("");
+  var CC={coord:"var(--bad)",locality:"var(--warn)",inactive:"var(--bad)",stale:"var(--warn)",dupe:"var(--bad)",name:"var(--bad)"};
+  document.getElementById("checks").innerHTML=DATA.checks.map(function(c){var cl=c.count===0;
+    return '<div class="check'+(cl?' clean':'')+'"><span class="nm">'+c.nm+(cl?' ✓':'')+'</span><span class="ct">'+fmt(c.count)+'<span class="pc">'+c.pct+'%</span></span><span class="bar"><i style="width:'+Math.max(c.pct,1.5)+'%;background:'+CC[c.key]+'"></i></span></div>';}).join("");
+  (function(){var W=400,H=480,mLa=49,xLa=61.1,mLo=-9,xLo=2.1;
+    function x(lo){return 30+(lo-mLo)/(xLo-mLo)*(W-60);} function y(la){return H-30-(la-mLa)/(xLa-mLa)*(H-60);}
+    document.getElementById("map").innerHTML=DATA.mapPoints.map(function(p){return '<circle cx="'+x(p[0]).toFixed(1)+'" cy="'+y(p[1]).toFixed(1)+'" r="1.3" fill="'+(p[2]?"var(--bad)":"var(--accent)")+'" opacity="'+(p[2]?.5:.32)+'"/>';}).join("");})();
+
+  // ---- live explorer (DuckDB-WASM over the full Parquet) ----
+  var PAGE=50, page=0, filter="all", term="", conn=null, totalMatch=0;
+  var TAGS={coord_bad:["coord","coords"],locality_bad:["locality","locality"],inactive:["inactive","inactive"],stale:["stale","stale"]};
+  function esc(s){return String(s).replace(/'/g,"''");}
+  function whereSQL(){
+    var w=[];
+    if(filter!=="all") w.push(filter);
+    if(term){var t="%"+esc(term)+"%"; w.push("(atco ILIKE '"+t+"' OR name ILIKE '"+t+"' OR locality ILIKE '"+t+"')");}
+    return w.length? "WHERE "+w.join(" AND ") : "";
+  }
+  function rowTags(r){return ["coord_bad","locality_bad","inactive","stale"].filter(function(k){return r[k];}).map(function(k){return '<span class="tag '+TAGS[k][0]+'">'+TAGS[k][1]+'</span>';}).join("");}
+  function setEngine(html){document.getElementById("engine").innerHTML=html;}
+  async function refresh(){
+    if(!conn) return;
+    var w=whereSQL();
+    var c=await conn.query("SELECT count(*)::INT AS n FROM naptan "+w);
+    totalMatch=c.get(0).n;
+    document.getElementById("count").innerHTML="<b>"+fmt(totalMatch)+"</b> matching record"+(totalMatch===1?"":"s")+" of "+fmt(DATA.totalStops);
+    var maxPage=Math.max(0,Math.ceil(totalMatch/PAGE)-1); if(page>maxPage)page=maxPage;
+    var res=await conn.query("SELECT atco,name,locality,status,modified,coord_bad,locality_bad,inactive,stale FROM naptan "+w+" ORDER BY atco LIMIT "+PAGE+" OFFSET "+(page*PAGE));
+    var rows=res.toArray().map(function(r){return r.toJSON();});
+    var html='<table><thead><tr><th>ATCO</th><th>Stop name</th><th class="hide-sm">Locality</th><th class="hide-sm">Status</th><th class="hide-sm">Modified</th><th>Issues</th></tr></thead><tbody>';
+    html+=rows.map(function(r){return '<tr><td class="atco">'+r.atco+'</td><td class="nm">'+(r.name||"—")+'</td><td class="hide-sm">'+(r.locality||'<span style="color:var(--bad)">—</span>')+'</td><td class="hide-sm">'+(r.status||"—")+'</td><td class="hide-sm mono">'+(r.modified||"—")+'</td><td>'+(rowTags(r)||'<span class="tag" style="color:var(--good);border-color:rgba(95,191,110,.4)">clean</span>')+'</td></tr>';}).join("");
+    html+='</tbody></table>';
+    document.getElementById("result").innerHTML=html;
+    document.getElementById("pager").style.display=totalMatch>PAGE?"flex":"none";
+    document.getElementById("pageinfo").textContent="Page "+(page+1)+" / "+(maxPage+1);
+    document.getElementById("prev").disabled=page<=0; document.getElementById("next").disabled=page>=maxPage;
+  }
+  document.querySelectorAll("#chips button").forEach(function(b){b.onclick=function(){document.querySelectorAll("#chips button").forEach(function(x){x.classList.remove("active");});b.classList.add("active");filter=b.dataset.f;page=0;refresh();};});
+  var qto;document.getElementById("q").addEventListener("input",function(e){clearTimeout(qto);qto=setTimeout(function(){term=e.target.value.trim();page=0;refresh();},250);});
+  document.getElementById("prev").onclick=function(){if(page>0){page--;refresh();}};
+  document.getElementById("next").onclick=function(){page++;refresh();};
+  document.getElementById("sqlToggle").onclick=function(){document.getElementById("sqlbox").classList.toggle("open");};
+  document.getElementById("runsql").onclick=async function(){
+    if(!conn)return; var q=document.getElementById("sql").value.trim();
+    if(!/^\s*(select|with)\b/i.test(q)){document.getElementById("result").innerHTML='<div class="loading" style="color:var(--bad)">Only SELECT / WITH queries are allowed.</div>';return;}
+    try{var res=await conn.query(q.replace(/;\s*$/,"")+" LIMIT 200");var arr=res.toArray().map(function(r){return r.toJSON();});
+      if(!arr.length){document.getElementById("result").innerHTML='<div class="loading">No rows.</div>';return;}
+      var cols=Object.keys(arr[0]);
+      var html='<table><thead><tr>'+cols.map(function(c){return '<th>'+c+'</th>';}).join("")+'</tr></thead><tbody>';
+      html+=arr.map(function(r){return '<tr>'+cols.map(function(c){return '<td>'+(r[c]===null?"—":r[c])+'</td>';}).join("")+'</tr>';}).join("")+'</tbody></table>';
+      document.getElementById("result").innerHTML=html; document.getElementById("pager").style.display="none";
+      document.getElementById("count").innerHTML="<b>"+arr.length+"</b> rows (capped at 200)";
+    }catch(e){document.getElementById("result").innerHTML='<div class="loading" style="color:var(--bad)">'+e.message+'</div>';}
+  };
+  </script>
+
+  <script type="module">
+  (async function(){
+    var PARQUET=new URL("naptan.parquet",document.baseURI).href;
+    function fail(msg){var e=document.getElementById("engine");e.innerHTML='<span class="err">engine unavailable</span>';document.getElementById("loading").innerHTML="Couldn’t load the in-browser query engine here ("+msg+"). The full-dataset aggregates above are still exact. Try a Chromium browser, or open this page directly.";}
+    try{
+      var duckdb=await import("https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm/+esm");
+      var bundles=duckdb.getJsDelivrBundles();
+      var bundle=await duckdb.selectBundle(bundles);
+      var wurl=URL.createObjectURL(new Blob(['importScripts("'+bundle.mainWorker+'");'],{type:"text/javascript"}));
+      var worker=new Worker(wurl);
+      var db=new duckdb.AsyncDuckDB(new duckdb.ConsoleLogger(),worker);
+      await db.instantiate(bundle.mainModule,bundle.pthreadWorker);
+      URL.revokeObjectURL(wurl);
+      var conn=await db.connect();
+      await db.registerFileURL("naptan.parquet",PARQUET,duckdb.DuckDBDataProtocol.HTTP,false);
+      await conn.query("CREATE VIEW naptan AS SELECT * FROM read_parquet('naptan.parquet')");
+      window.conn=conn;
+      // expose to the classic script's closure
+      var ev=new CustomEvent("duckdb-ready");
+      document.getElementById("engine").innerHTML='DuckDB-WASM · <span class="ok">ready</span>';
+      // hand the connection over
+      window.__naptanReady(conn);
+    }catch(e){ fail((e&&e.message)||"unknown"); }
+  })();
+  </script>
+  <script>
+  // bridge: classic script exposes a setter the module calls when the engine is ready
+  window.__naptanReady=function(c){ conn=c; refresh(); };
+  </script>
+</body>
+</html>
